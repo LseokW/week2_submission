@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>K-Means 군집화 × NumPy</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            dark: { DEFAULT: '#0f172a', panel: '#1e293b', border: '#334155' },
+            brand: { cyan: '#06b6d4', violet: '#8b5cf6', rose: '#f43f5e', amber: '#f59e0b', green: '#22c55e' }
+          },
+          animation: {
+            'fade-in':   'fadeIn 0.6s ease forwards',
+            'slide-up':  'slideUp 0.5s ease forwards',
+            'pulse-slow':'pulse 2s cubic-bezier(0.4,0,0.6,1) infinite',
+            'spin-slow': 'spin 1.5s linear infinite',
+          },
+          keyframes: {
+            fadeIn:  { from:{opacity:0},           to:{opacity:1} },
+            slideUp: { from:{opacity:0,transform:'translateY(20px)'}, to:{opacity:1,transform:'translateY(0)'} },
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})"></script>
+
+  <style>
+    ::-webkit-scrollbar{width:6px}
+    ::-webkit-scrollbar-track{background:#0f172a}
+    ::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+
+    .glass{
+      background:rgba(30,41,59,0.7);
+      backdrop-filter:blur(12px);
+      -webkit-backdrop-filter:blur(12px);
+      border:1px solid rgba(51,65,85,0.8);
+    }
+    .gradient-text{
+      background:linear-gradient(135deg,#06b6d4 0%,#8b5cf6 50%,#f43f5e 100%);
+      -webkit-background-clip:text;
+      -webkit-text-fill-color:transparent;
+      background-clip:text;
+    }
+    .btn-glow{
+      position:relative;
+      background:linear-gradient(135deg,#06b6d4,#8b5cf6);
+      transition:all .3s ease;
+    }
+    .btn-glow::before{
+      content:'';position:absolute;inset:-2px;
+      background:linear-gradient(135deg,#06b6d4,#8b5cf6,#f43f5e);
+      border-radius:inherit;z-index:-1;opacity:0;transition:opacity .3s;
+    }
+    .btn-glow:hover::before{opacity:1}
+    .btn-glow:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(6,182,212,.4)}
+    .btn-glow:active{transform:translateY(0)}
+
+    .input-glow:focus{
+      box-shadow:0 0 0 2px rgba(6,182,212,.4);
+      border-color:#06b6d4;outline:none;
+    }
+    .plot-img{transition:transform .3s ease,box-shadow .3s ease}
+    .plot-img:hover{transform:scale(1.02);box-shadow:0 0 30px rgba(6,182,212,.25)}
+
+    .step-card{
+      border-left:3px solid;
+      transition:border-color .3s;
+    }
+    .step-card:hover{filter:brightness(1.1)}
+
+    .cluster-a{color:#06b6d4} .cluster-b{color:#8b5cf6} .cluster-c{color:#f43f5e}
+    .bg-cluster-a{background:rgba(6,182,212,.15);border-color:rgba(6,182,212,.4)}
+    .bg-cluster-b{background:rgba(139,92,246,.15);border-color:rgba(139,92,246,.4)}
+    .bg-cluster-c{background:rgba(244,63,94,.15);border-color:rgba(244,63,94,.4)}
+
+    #toast-container{position:fixed;top:1.5rem;right:1.5rem;z-index:9999;display:flex;flex-direction:column;gap:.5rem}
+  </style>
+</head>
+
+<body class="bg-[#0f172a] text-white min-h-screen font-sans">
+
+<!-- ── Toast Container ──────────────────────────────────── -->
+<div id="toast-container"></div>
+
+<!-- ── Header ────────────────────────────────────────────── -->
+<header class="border-b border-dark-border/50 bg-dark-panel/40 backdrop-blur-md sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-cyan to-brand-violet flex items-center justify-center text-lg font-bold shadow-lg">K</div>
+      <div>
+        <h1 class="text-xl font-bold gradient-text tracking-tight">K-Means 군집화 × NumPy</h1>
+        <p class="text-xs text-slate-400">비지도 학습으로 숨겨진 패턴 발견</p>
+      </div>
+    </div>
+    <div id="status-badge" class="px-3 py-1.5 rounded-full text-xs font-semibold border border-slate-600 text-slate-400 bg-slate-800/50">
+      ● 대기 중
+    </div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
+
+  <!-- ── Hero ─────────────────────────────────────────────── -->
+  <section class="text-center space-y-3">
+    <h2 class="text-4xl font-extrabold gradient-text">K-Means Clustering</h2>
+    <p class="text-slate-300 text-lg max-w-2xl mx-auto">
+      정답(레이블) 없이 데이터 스스로 그룹을 발견하는 비지도 학습 알고리즘.<br>
+      <span class="text-brand-cyan font-semibold">sklearn 없이</span> numpy만으로 처음부터 구현했습니다.
+    </p>
+    <div class="flex items-center justify-center gap-6 text-sm text-slate-400 mt-2">
+      <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-brand-cyan inline-block"></span>K = 3 클러스터</span>
+      <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-brand-violet inline-block"></span>데이터 90개</span>
+      <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-brand-rose inline-block"></span>유클리드 거리</span>
+    </div>
+  </section>
+
+  <!-- ── Algorithm Card ────────────────────────────────────── -->
+  <section class="glass rounded-2xl p-6">
+    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+      <span class="text-brand-violet">⚙</span> 알고리즘 원리
+    </h3>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="step-card glass rounded-xl p-4 border-brand-cyan/50">
+        <div class="text-brand-cyan text-2xl font-black mb-1">01</div>
+        <div class="font-semibold text-sm mb-1">초기화</div>
+        <div class="text-xs text-slate-400">데이터에서 K개 랜덤 중심점 선택</div>
+      </div>
+      <div class="step-card glass rounded-xl p-4 border-brand-violet/50">
+        <div class="text-brand-violet text-2xl font-black mb-1">02</div>
+        <div class="font-semibold text-sm mb-1">배정</div>
+        <div class="text-xs text-slate-400">각 점 → 거리 최소 클러스터에 배정</div>
+      </div>
+      <div class="step-card glass rounded-xl p-4 border-brand-amber/50">
+        <div class="text-brand-amber text-2xl font-black mb-1">03</div>
+        <div class="font-semibold text-sm mb-1">이동</div>
+        <div class="text-xs text-slate-400">클러스터 평균으로 중심점 갱신</div>
+      </div>
+      <div class="step-card glass rounded-xl p-4 border-brand-green/50">
+        <div class="text-brand-green text-2xl font-black mb-1">04</div>
+        <div class="font-semibold text-sm mb-1">수렴</div>
+        <div class="text-xs text-slate-400">중심점 변화 &lt; 1e-6 이면 종료</div>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-6 text-sm">
+      <div class="bg-slate-900/60 rounded-xl p-4">
+        <div class="text-slate-400 text-xs mb-2 font-semibold uppercase tracking-widest">WCSS Loss 함수</div>
+        <div class="text-white">$$\text{WCSS} = \sum_{k=1}^{K}\sum_{x \in C_k} \|x - \mu_k\|^2$$</div>
+        <p class="text-xs text-slate-400 mt-2">각 점과 배정된 중심점까지 거리의 제곱합. 작을수록 군집이 촘촘함.</p>
+      </div>
+      <div class="bg-slate-900/60 rounded-xl p-4">
+        <div class="text-slate-400 text-xs mb-2 font-semibold uppercase tracking-widest">유클리드 거리</div>
+        <div class="text-white">$$d(x, \mu_k) = \sqrt{\sum_{i=1}^{n}(x_i - \mu_{k,i})^2}$$</div>
+        <p class="text-xs text-slate-400 mt-2">2D 평면에서 두 점 사이의 직선 거리. 가장 가까운 중심점에 배정.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Control + Graphs ──────────────────────────────────── -->
+  <div class="grid lg:grid-cols-3 gap-6">
+
+    <!-- Control Panel -->
+    <div class="lg:col-span-1 space-y-5">
+      <div class="glass rounded-2xl p-6 space-y-5">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <span class="text-brand-cyan">▶</span> 학습 제어
+        </h3>
+
+        <!-- Iter Slider -->
+        <div>
+          <div class="flex justify-between items-center mb-2">
+            <label class="text-sm text-slate-300 font-medium">최대 반복 횟수</label>
+            <span id="iter-val" class="text-brand-cyan font-bold text-lg">10</span>
+          </div>
+          <input type="range" id="iter-slider" min="1" max="10" value="10"
+                 class="w-full accent-brand-cyan cursor-pointer" oninput="document.getElementById('iter-val').textContent=this.value">
+          <div class="flex justify-between text-xs text-slate-500 mt-1">
+            <span>1회</span><span>10회</span>
+          </div>
+        </div>
+
+        <!-- Run Button -->
+        <button id="btn-cluster" onclick="runClustering()"
+                class="btn-glow w-full py-3 rounded-xl text-white font-bold text-sm shadow-lg">
+          군집화 실행
+        </button>
+
+        <!-- Result Badges -->
+        <div id="result-badges" class="hidden space-y-3 animate-slide-up">
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="glass rounded-lg p-2">
+              <div class="text-xs text-slate-400">반복</div>
+              <div id="badge-iter" class="text-brand-cyan font-bold text-lg">—</div>
+            </div>
+            <div class="glass rounded-lg p-2">
+              <div class="text-xs text-slate-400">수렴</div>
+              <div id="badge-conv" class="font-bold text-lg">—</div>
+            </div>
+            <div class="glass rounded-lg p-2">
+              <div class="text-xs text-slate-400">WCSS</div>
+              <div id="badge-wcss" class="text-brand-violet font-bold text-sm">—</div>
+            </div>
+          </div>
+
+          <!-- Centroids Table -->
+          <div>
+            <div class="text-xs text-slate-400 uppercase tracking-widest mb-2">중심점 좌표</div>
+            <div id="centroids-table" class="space-y-1.5 text-sm"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Graphs -->
+    <div class="lg:col-span-2 space-y-5">
+      <!-- Cluster Plot -->
+      <div class="glass rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-bold text-sm text-slate-300 uppercase tracking-widest">군집 결과</h3>
+          <div class="flex gap-2 text-xs">
+            <span class="cluster-a flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#06b6d4] inline-block"></span>Cluster A</span>
+            <span class="cluster-b flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#8b5cf6] inline-block"></span>Cluster B</span>
+            <span class="cluster-c flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#f43f5e] inline-block"></span>Cluster C</span>
+          </div>
+        </div>
+        <div id="cluster-placeholder" class="flex items-center justify-center h-64 rounded-xl bg-slate-900/60 border border-slate-700/50">
+          <div class="text-center text-slate-500">
+            <div class="text-4xl mb-2">◉</div>
+            <div class="text-sm">군집화를 실행하면 결과가 표시됩니다</div>
+          </div>
+        </div>
+        <img id="cluster-img" src="" alt="Clustering Result"
+             class="plot-img hidden w-full rounded-xl object-contain" />
+      </div>
+
+      <!-- Loss Plot -->
+      <div class="glass rounded-2xl p-5">
+        <h3 class="font-bold text-sm text-slate-300 uppercase tracking-widest mb-3">WCSS Loss 곡선</h3>
+        <div id="loss-placeholder" class="flex items-center justify-center h-48 rounded-xl bg-slate-900/60 border border-slate-700/50">
+          <div class="text-center text-slate-500">
+            <div class="text-4xl mb-2">📉</div>
+            <div class="text-sm">Loss 곡선이 여기에 표시됩니다</div>
+          </div>
+        </div>
+        <img id="loss-img" src="" alt="Loss Curve"
+             class="plot-img hidden w-full rounded-xl object-contain" />
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Predict Panel ─────────────────────────────────────── -->
+  <section class="glass rounded-2xl p-6">
+    <h3 class="text-lg font-bold text-white mb-1 flex items-center gap-2">
+      <span class="text-brand-amber">★</span> 새 좌표 예측
+    </h3>
+    <p class="text-slate-400 text-sm mb-5">(x, y) 좌표를 입력하면 가장 가까운 클러스터를 예측합니다. (범위: -10 ~ 10)</p>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm text-slate-300 mb-1.5 font-medium">X 좌표</label>
+            <input id="pred-x" type="number" value="3" step="0.5" min="-15" max="15"
+                   class="input-glow w-full bg-slate-900/60 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm text-slate-300 mb-1.5 font-medium">Y 좌표</label>
+            <input id="pred-y" type="number" value="3" step="0.5" min="-15" max="15"
+                   class="input-glow w-full bg-slate-900/60 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm" />
+          </div>
+        </div>
+
+        <!-- Quick Buttons -->
+        <div>
+          <div class="text-xs text-slate-500 mb-2">빠른 선택</div>
+          <div class="flex flex-wrap gap-2">
+            <button onclick="setPred(1,1)"   class="px-3 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 transition">(1, 1)</button>
+            <button onclick="setPred(6,6)"   class="px-3 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 transition">(6, 6)</button>
+            <button onclick="setPred(-6,6)"  class="px-3 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 transition">(-6, 6)</button>
+            <button onclick="setPred(0,0)"   class="px-3 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 transition">(0, 0)</button>
+            <button onclick="setPred(-3,10)" class="px-3 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 transition">(-3, 10)</button>
+          </div>
+        </div>
+
+        <button id="btn-predict" onclick="runPredict()"
+                class="btn-glow w-full py-3 rounded-xl text-white font-bold text-sm">
+          클러스터 예측
+        </button>
+
+        <!-- Predict Result -->
+        <div id="predict-result" class="hidden glass rounded-xl p-4 animate-slide-up">
+          <div class="text-xs text-slate-400 mb-2">예측 결과</div>
+          <div id="pred-cluster-name" class="text-2xl font-black mb-1"></div>
+          <div class="text-sm text-slate-400">
+            좌표: (<span id="pred-coord-x"></span>, <span id="pred-coord-y"></span>) &nbsp;|&nbsp;
+            중심점까지 거리: <span id="pred-dist" class="text-brand-amber font-semibold"></span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div id="pred-placeholder" class="flex items-center justify-center h-full min-h-[200px] rounded-xl bg-slate-900/60 border border-slate-700/50">
+          <div class="text-center text-slate-500">
+            <div class="text-4xl mb-2">★</div>
+            <div class="text-sm">예측 결과 그래프</div>
+          </div>
+        </div>
+        <img id="pred-img" src="" alt="Prediction Result"
+             class="plot-img hidden w-full rounded-xl object-contain" />
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Algorithm Detail ──────────────────────────────────── -->
+  <section class="glass rounded-2xl p-6">
+    <h3 class="text-lg font-bold text-white mb-5 flex items-center gap-2">
+      <span class="text-brand-violet">{ }</span> 알고리즘 구현 핵심
+    </h3>
+    <div class="grid md:grid-cols-2 gap-5 text-sm font-mono">
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-cyan text-xs mb-3 font-sans uppercase tracking-widest">배정 단계 (Assign)</div>
+<pre class="text-slate-300 text-xs leading-relaxed"><span class="text-brand-violet"># (N,1,2) - (1,K,2) → (N,K)</span>
+diffs = data[:, np.newaxis, :] \
+      - centroids[np.newaxis, :, :]
+dists = np.sqrt((diffs**2).sum(axis=2))
+labels = np.argmin(dists, axis=1)</pre>
+      </div>
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-violet text-xs mb-3 font-sans uppercase tracking-widest">중심점 갱신 (Update)</div>
+<pre class="text-slate-300 text-xs leading-relaxed"><span class="text-brand-violet"># 각 클러스터 평균으로 이동</span>
+for k in range(K):
+    members = data[labels == k]
+    if len(members) > 0:
+        centroids[k] = members.mean(axis=0)</pre>
+      </div>
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-amber text-xs mb-3 font-sans uppercase tracking-widest">WCSS 계산</div>
+<pre class="text-slate-300 text-xs leading-relaxed"><span class="text-brand-violet"># 클러스터 내 거리 제곱합</span>
+wcss = 0
+for k in range(K):
+    m = data[labels == k]
+    diff = m - centroids[k]
+    wcss += (diff**2).sum()</pre>
+      </div>
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-green text-xs mb-3 font-sans uppercase tracking-widest">수렴 판정</div>
+<pre class="text-slate-300 text-xs leading-relaxed"><span class="text-brand-violet"># 중심점 이동량 &lt; threshold</span>
+shift = np.max(np.linalg.norm(
+    new_centroids - old_centroids,
+    axis=1))
+if shift &lt; 1e-6:
+    converged = True; break</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Footer ────────────────────────────────────────────── -->
+  <footer class="text-center text-slate-600 text-xs py-4">
+    K-Means × NumPy — 외부 ML 라이브러리 없이 구현 · FastAPI + Tailwind CSS
+  </footer>
+
+</main>
+
+<!-- ── JavaScript ─────────────────────────────────────────── -->
+<script>
+  const CLUSTER_COLORS = ['#06b6d4', '#8b5cf6', '#f43f5e'];
+  const CLUSTER_BG     = ['bg-cluster-a', 'bg-cluster-b', 'bg-cluster-c'];
+  const CLUSTER_NAMES  = ['Cluster A', 'Cluster B', 'Cluster C'];
+
+  function setPred(x, y) {
+    document.getElementById('pred-x').value = x;
+    document.getElementById('pred-y').value = y;
+  }
+
+  function showToast(msg, type = 'info') {
+    const colors = { success: 'border-green-500 text-green-300', error: 'border-rose-500 text-rose-300', info: 'border-cyan-500 text-cyan-300' };
+    const t = document.createElement('div');
+    t.className = `glass rounded-xl px-4 py-3 text-sm border ${colors[type]} min-w-[220px] animate-slide-up shadow-xl`;
+    t.textContent = msg;
+    document.getElementById('toast-container').appendChild(t);
+    setTimeout(() => t.remove(), 3500);
+  }
+
+  function setLoading(btnId, loading) {
+    const btn = document.getElementById(btnId);
+    if (loading) {
+      btn.disabled = true;
+      btn.innerHTML = '<svg class="animate-spin-slow inline w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>실행 중...';
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = btnId === 'btn-cluster' ? '군집화 실행' : '클러스터 예측';
+    }
+  }
+
+  function cacheBust(url) {
+    return url + '?t=' + Date.now();
+  }
+
+  async function runClustering() {
+    const maxIter = document.getElementById('iter-slider').value;
+    setLoading('btn-cluster', true);
+
+    try {
+      const res = await fetch(`/cluster?max_iter=${maxIter}`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      const data = await res.json();
+
+      // Graphs
+      const ci = document.getElementById('cluster-img');
+      const li = document.getElementById('loss-img');
+      ci.src = cacheBust(data.cluster_plot);
+      li.src = cacheBust(data.loss_plot);
+      ci.classList.remove('hidden');
+      li.classList.remove('hidden');
+      document.getElementById('cluster-placeholder').classList.add('hidden');
+      document.getElementById('loss-placeholder').classList.add('hidden');
+
+      // Badges
+      document.getElementById('badge-iter').textContent = data.iterations;
+      const convEl = document.getElementById('badge-conv');
+      convEl.textContent = data.converged ? '✓' : '✗';
+      convEl.className = 'font-bold text-lg ' + (data.converged ? 'text-brand-green' : 'text-brand-rose');
+      document.getElementById('badge-wcss').textContent = data.final_wcss.toFixed(1);
+      document.getElementById('result-badges').classList.remove('hidden');
+
+      // Centroids table
+      const tbl = document.getElementById('centroids-table');
+      tbl.innerHTML = data.centroids.map((c, i) => `
+        <div class="flex items-center justify-between glass rounded-lg px-3 py-2 border ${CLUSTER_BG[i]}">
+          <span class="font-semibold text-xs" style="color:${CLUSTER_COLORS[i]}">${CLUSTER_NAMES[i]}</span>
+          <span class="text-xs text-slate-300">(${c[0].toFixed(2)}, ${c[1].toFixed(2)})</span>
+        </div>
+      `).join('');
+
+      // Status badge
+      const sb = document.getElementById('status-badge');
+      sb.className = 'px-3 py-1.5 rounded-full text-xs font-semibold border ' + (data.converged ? 'border-green-500 text-green-400 bg-green-900/30' : 'border-amber-500 text-amber-400 bg-amber-900/30');
+      sb.textContent = data.converged ? `● 수렴 완료 (${data.iterations}회)` : `● 최대 반복 도달 (${data.iterations}회)`;
+
+      showToast(`군집화 완료! ${data.iterations}회 반복 · WCSS: ${data.final_wcss.toFixed(1)}`, 'success');
+    } catch (err) {
+      showToast('오류: ' + err.message, 'error');
+    } finally {
+      setLoading('btn-cluster', false);
+    }
+  }
+
+  async function runPredict() {
+    const x = parseFloat(document.getElementById('pred-x').value);
+    const y = parseFloat(document.getElementById('pred-y').value);
+
+    setLoading('btn-predict', true);
+    try {
+      const res = await fetch('/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x, y })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      const data = await res.json();
+
+      const cn = document.getElementById('pred-cluster-name');
+      cn.textContent = data.cluster_name;
+      cn.style.color = CLUSTER_COLORS[data.cluster_id];
+
+      document.getElementById('pred-coord-x').textContent = data.x.toFixed(2);
+      document.getElementById('pred-coord-y').textContent = data.y.toFixed(2);
+      document.getElementById('pred-dist').textContent = data.distance.toFixed(3);
+      document.getElementById('predict-result').classList.remove('hidden');
+
+      const pi = document.getElementById('pred-img');
+      pi.src = cacheBust(data.prediction_plot);
+      pi.classList.remove('hidden');
+      document.getElementById('pred-placeholder').classList.add('hidden');
+
+      showToast(`예측: ${data.cluster_name} (거리: ${data.distance.toFixed(2)})`, 'success');
+    } catch (err) {
+      showToast('오류: ' + err.message, 'error');
+    } finally {
+      setLoading('btn-predict', false);
+    }
+  }
+</script>
+</body>
+</html>

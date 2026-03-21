@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>경사 하강법 × NumPy</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            dark: { DEFAULT: '#0f172a', panel: '#1e293b', border: '#334155' },
+            brand: { cyan: '#06b6d4', violet: '#8b5cf6', rose: '#f43f5e', amber: '#f59e0b', green: '#22c55e' }
+          },
+          animation: {
+            'fade-in':   'fadeIn .6s ease forwards',
+            'slide-up':  'slideUp .5s ease forwards',
+            'spin-slow': 'spin 1.5s linear infinite',
+            'pulse-slow':'pulse 2s cubic-bezier(.4,0,.6,1) infinite',
+          },
+          keyframes: {
+            fadeIn:  { from:{opacity:0}, to:{opacity:1} },
+            slideUp: { from:{opacity:0,transform:'translateY(20px)'}, to:{opacity:1,transform:'translateY(0)'} },
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})"></script>
+
+  <style>
+    ::-webkit-scrollbar{width:6px}
+    ::-webkit-scrollbar-track{background:#0f172a}
+    ::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+    .glass{background:rgba(30,41,59,.7);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(51,65,85,.8)}
+    .gradient-text{background:linear-gradient(135deg,#06b6d4 0%,#8b5cf6 50%,#f43f5e 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    .btn-glow{position:relative;background:linear-gradient(135deg,#f43f5e,#8b5cf6);transition:all .3s ease}
+    .btn-glow::before{content:'';position:absolute;inset:-2px;background:linear-gradient(135deg,#f43f5e,#8b5cf6,#06b6d4);border-radius:inherit;z-index:-1;opacity:0;transition:opacity .3s}
+    .btn-glow:hover::before{opacity:1}
+    .btn-glow:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(244,63,94,.4)}
+    .btn-glow:active{transform:translateY(0)}
+    .plot-img{transition:transform .3s,box-shadow .3s}
+    .plot-img:hover{transform:scale(1.02);box-shadow:0 0 30px rgba(6,182,212,.2)}
+    .preset-btn{padding:.35rem .75rem;border-radius:.5rem;font-size:.75rem;border:1px solid #334155;background:#1e293b;color:#94a3b8;cursor:pointer;transition:all .2s}
+    .preset-btn:hover{background:#334155;color:white}
+    #toast-container{position:fixed;top:1.5rem;right:1.5rem;z-index:9999;display:flex;flex-direction:column;gap:.5rem}
+
+    /* lr warning colors */
+    .lr-ok     { accent-color: #06b6d4 }
+    .lr-warn   { accent-color: #f59e0b }
+    .lr-danger { accent-color: #f43f5e }
+
+    .table-row-last { background: rgba(34,197,94,.08); }
+    .table-row-diverged { background: rgba(244,63,94,.08); }
+  </style>
+</head>
+
+<body class="bg-[#0f172a] text-white min-h-screen font-sans">
+<div id="toast-container"></div>
+
+<!-- Header -->
+<header class="border-b border-dark-border/50 bg-dark-panel/40 backdrop-blur-md sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-rose to-brand-violet flex items-center justify-center font-black text-sm shadow-lg">∇</div>
+      <div>
+        <h1 class="text-xl font-bold gradient-text tracking-tight">경사 하강법 × NumPy</h1>
+        <p class="text-xs text-slate-400">f(x) = x² 위에서 최솟값을 향해 내려가는 공</p>
+      </div>
+    </div>
+    <div id="status-badge" class="px-3 py-1.5 rounded-full text-xs font-semibold border border-slate-600 text-slate-400 bg-slate-800/50">● 대기 중</div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
+
+  <!-- Hero -->
+  <section class="text-center space-y-3">
+    <h2 class="text-4xl font-extrabold gradient-text">Gradient Descent</h2>
+    <p class="text-slate-300 text-lg max-w-2xl mx-auto">
+      산 꼭대기에서 공을 굴리는 것처럼, <span class="text-brand-rose font-semibold">기울기의 반대 방향</span>으로<br>
+      한 걸음씩 이동하며 손실 함수의 최솟값을 찾아갑니다.
+    </p>
+    <div class="flex justify-center gap-6 text-sm mt-2">
+      <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-brand-violet inline-block"></span>f(x) = x²</span>
+      <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-brand-rose inline-block"></span>∇f(x) = 2x</span>
+      <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-brand-green inline-block"></span>목표: x = 0</span>
+    </div>
+  </section>
+
+  <!-- Algorithm Card -->
+  <section class="glass rounded-2xl p-6">
+    <h3 class="text-lg font-bold mb-4 flex items-center gap-2"><span class="text-brand-violet">⚙</span> 알고리즘 원리</h3>
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="bg-slate-900/60 rounded-xl p-5 space-y-4">
+        <div>
+          <div class="text-xs text-slate-400 uppercase tracking-widest mb-2 font-semibold">업데이트 규칙</div>
+          <div class="text-white">$$x_{t+1} = x_t - \alpha \cdot \nabla f(x_t)$$</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-400 uppercase tracking-widest mb-2 font-semibold">이 예제에서</div>
+          <div class="text-white text-sm">$$f(x) = x^2 \quad \Rightarrow \quad \nabla f(x) = 2x$$</div>
+          <div class="text-white text-sm mt-2">$$x_{t+1} = x_t - \alpha \cdot 2x_t$$</div>
+        </div>
+      </div>
+      <div class="space-y-3">
+        <div class="glass rounded-xl p-3 border-l-4 border-brand-cyan">
+          <div class="text-xs font-semibold text-brand-cyan mb-1">🐢 lr 너무 작음 (0.01~0.05)</div>
+          <div class="text-xs text-slate-400">수렴은 하지만 매우 많은 step이 필요. 학습 속도 느림</div>
+        </div>
+        <div class="glass rounded-xl p-3 border-l-4 border-brand-green">
+          <div class="text-xs font-semibold text-brand-green mb-1">✓ lr 적당 (0.1~0.4)</div>
+          <div class="text-xs text-slate-400">빠르고 안정적으로 최솟값에 수렴. 실전에서 권장</div>
+        </div>
+        <div class="glass rounded-xl p-3 border-l-4 border-brand-rose">
+          <div class="text-xs font-semibold text-brand-rose mb-1">💥 lr 너무 큼 (0.8~0.9)</div>
+          <div class="text-xs text-slate-400">최솟값을 지나쳐 발산. Loss가 무한정 증가</div>
+        </div>
+        <div class="glass rounded-xl p-3 border-l-4 border-brand-amber">
+          <div class="text-xs font-semibold text-brand-amber mb-1">📌 임계값</div>
+          <div class="text-xs text-slate-400">f(x)=x²에서 lr ≥ 1.0 이면 반드시 발산. lr &lt; 1.0 이면 수렴 보장</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Control + Graphs -->
+  <div class="grid lg:grid-cols-3 gap-6">
+
+    <!-- Control Panel -->
+    <div class="lg:col-span-1 space-y-5">
+      <div class="glass rounded-2xl p-6 space-y-5">
+        <h3 class="text-lg font-bold flex items-center gap-2"><span class="text-brand-rose">▶</span> 파라미터 설정</h3>
+
+        <!-- Presets -->
+        <div>
+          <div class="text-xs text-slate-400 mb-2 font-semibold uppercase tracking-widest">빠른 프리셋</div>
+          <div class="grid grid-cols-2 gap-2">
+            <button class="preset-btn" onclick="applyPreset(-4, 0.10, 20)">기본 (수렴)</button>
+            <button class="preset-btn" onclick="applyPreset(-4, 0.40, 10)">빠른 수렴</button>
+            <button class="preset-btn" onclick="applyPreset(-4, 0.02, 50)">느린 수렴</button>
+            <button class="preset-btn text-brand-rose border-brand-rose/40" onclick="applyPreset(-4, 0.90, 20)">💥 발산!</button>
+          </div>
+        </div>
+
+        <!-- x0 Slider -->
+        <div>
+          <div class="flex justify-between mb-1.5">
+            <label class="text-sm text-slate-300 font-medium">시작점 x₀</label>
+            <span id="x0-val" class="text-brand-violet font-bold text-lg">-4.0</span>
+          </div>
+          <input type="range" id="x0-slider" min="-5" max="5" step="0.5" value="-4"
+                 class="w-full accent-brand-violet cursor-pointer"
+                 oninput="document.getElementById('x0-val').textContent=parseFloat(this.value).toFixed(1)">
+          <div class="flex justify-between text-xs text-slate-500 mt-1"><span>-5</span><span>0</span><span>+5</span></div>
+        </div>
+
+        <!-- lr Slider -->
+        <div>
+          <div class="flex justify-between mb-1.5">
+            <label class="text-sm text-slate-300 font-medium">학습률 α (lr)</label>
+            <span id="lr-val" class="font-bold text-lg text-brand-cyan">0.10</span>
+          </div>
+          <input type="range" id="lr-slider" min="0.01" max="0.90" step="0.01" value="0.10"
+                 class="w-full lr-ok cursor-pointer" id="lr-slider"
+                 oninput="updateLr(this.value)">
+          <div class="flex justify-between text-xs text-slate-500 mt-1"><span>0.01</span><span>0.45</span><span>0.90</span></div>
+          <div id="lr-warning" class="hidden mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold border border-brand-rose/40 text-brand-rose bg-brand-rose/10">
+            ⚠ 발산 위험 구간입니다
+          </div>
+        </div>
+
+        <!-- Steps Slider -->
+        <div>
+          <div class="flex justify-between mb-1.5">
+            <label class="text-sm text-slate-300 font-medium">최대 스텝 수</label>
+            <span id="steps-val" class="text-brand-amber font-bold text-lg">20</span>
+          </div>
+          <input type="range" id="steps-slider" min="5" max="50" step="1" value="20"
+                 class="w-full accent-brand-amber cursor-pointer"
+                 oninput="document.getElementById('steps-val').textContent=this.value">
+          <div class="flex justify-between text-xs text-slate-500 mt-1"><span>5</span><span>50</span></div>
+        </div>
+
+        <!-- Run Button -->
+        <button id="btn-run" onclick="runGD()"
+                class="btn-glow w-full py-3 rounded-xl text-white font-bold text-sm shadow-lg">
+          경사 하강 실행
+        </button>
+
+        <!-- Result Badges -->
+        <div id="result-section" class="hidden space-y-3 animate-slide-up">
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="glass rounded-lg p-2">
+              <div class="text-xs text-slate-400">최종 x</div>
+              <div id="badge-x" class="text-brand-violet font-bold text-sm">—</div>
+            </div>
+            <div class="glass rounded-lg p-2">
+              <div class="text-xs text-slate-400">Loss</div>
+              <div id="badge-loss" class="text-brand-cyan font-bold text-sm">—</div>
+            </div>
+            <div class="glass rounded-lg p-2">
+              <div class="text-xs text-slate-400">스텝</div>
+              <div id="badge-steps" class="text-brand-amber font-bold text-sm">—</div>
+            </div>
+          </div>
+          <div id="badge-result" class="text-center py-2 rounded-xl font-bold text-sm"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Graphs -->
+    <div class="lg:col-span-2 space-y-5">
+
+      <!-- Landscape -->
+      <div class="glass rounded-2xl p-5">
+        <h3 class="font-bold text-sm text-slate-300 uppercase tracking-widest mb-3">
+          <span class="text-brand-violet">▲</span> Loss Landscape + 이동 경로
+        </h3>
+        <div id="landscape-ph" class="flex items-center justify-center h-64 rounded-xl bg-slate-900/60 border border-slate-700/50">
+          <div class="text-center text-slate-500"><div class="text-5xl mb-2">⛰</div><div class="text-sm">실행 후 경로가 표시됩니다</div></div>
+        </div>
+        <img id="landscape-img" src="" alt="Landscape" class="plot-img hidden w-full rounded-xl"/>
+      </div>
+
+      <!-- Loss Curve -->
+      <div class="glass rounded-2xl p-5">
+        <h3 class="font-bold text-sm text-slate-300 uppercase tracking-widest mb-3">
+          <span class="text-brand-cyan">📉</span> Step별 Loss 수렴 곡선
+        </h3>
+        <div id="loss-ph" class="flex items-center justify-center h-48 rounded-xl bg-slate-900/60 border border-slate-700/50">
+          <div class="text-center text-slate-500"><div class="text-4xl mb-2">📉</div><div class="text-sm">Loss 곡선이 여기에 표시됩니다</div></div>
+        </div>
+        <img id="loss-img" src="" alt="Loss Curve" class="plot-img hidden w-full rounded-xl"/>
+      </div>
+
+      <!-- Step Table -->
+      <div id="table-section" class="hidden glass rounded-2xl p-5 animate-slide-up">
+        <h3 class="font-bold text-sm text-slate-300 uppercase tracking-widest mb-3">
+          <span class="text-brand-amber">≡</span> Step 상세 기록
+        </h3>
+        <div class="overflow-y-auto max-h-64 rounded-xl">
+          <table class="w-full text-xs">
+            <thead class="sticky top-0 bg-slate-900">
+              <tr class="text-slate-400 font-semibold">
+                <th class="px-3 py-2 text-left">Step</th>
+                <th class="px-3 py-2 text-right">x</th>
+                <th class="px-3 py-2 text-right">f(x)</th>
+                <th class="px-3 py-2 text-right">∇f(x)</th>
+                <th class="px-3 py-2 text-right">Δx</th>
+              </tr>
+            </thead>
+            <tbody id="step-tbody" class="divide-y divide-slate-800"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Code Snippet -->
+  <section class="glass rounded-2xl p-6">
+    <h3 class="text-lg font-bold mb-5 flex items-center gap-2"><span class="text-brand-violet">{ }</span> 구현 핵심 코드</h3>
+    <div class="grid md:grid-cols-3 gap-4 text-xs font-mono">
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-violet text-xs mb-3 font-sans uppercase tracking-widest">손실 함수</div>
+<pre class="text-slate-300 leading-relaxed"><span class="text-brand-rose">def</span> loss(x):
+    <span class="text-brand-violet"># f(x) = x²</span>
+    return x ** 2
+
+<span class="text-brand-rose">def</span> gradient(x):
+    <span class="text-brand-violet"># ∇f(x) = 2x</span>
+    return 2 * x</pre>
+      </div>
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-cyan text-xs mb-3 font-sans uppercase tracking-widest">업데이트 규칙</div>
+<pre class="text-slate-300 leading-relaxed"><span class="text-brand-violet"># x_new = x - lr·∇f(x)</span>
+for step in range(max_steps):
+    grad = gradient(x)
+    x = x - lr * grad
+
+    if loss(x) &lt; 1e-6:
+        break  <span class="text-brand-violet"># 수렴!</span></pre>
+      </div>
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-rose text-xs mb-3 font-sans uppercase tracking-widest">발산 감지</div>
+<pre class="text-slate-300 leading-relaxed"><span class="text-brand-violet"># |x| > 50 이면 발산</span>
+x_new = x - lr * grad
+if abs(x_new) > 50:
+    diverged = True
+    break  <span class="text-brand-rose"># 💥 발산!</span>
+x = x_new</pre>
+      </div>
+    </div>
+  </section>
+
+  <footer class="text-center text-slate-600 text-xs py-4">
+    경사 하강법 × NumPy — f(x)=x² 최적화 시각화 · FastAPI + Tailwind CSS
+  </footer>
+</main>
+
+<script>
+  function cacheBust(url) { return url + '?t=' + Date.now(); }
+
+  function showToast(msg, type='info') {
+    const colors = { success:'border-green-500 text-green-300', error:'border-rose-500 text-rose-300', info:'border-cyan-500 text-cyan-300', warn:'border-amber-500 text-amber-300' };
+    const t = document.createElement('div');
+    t.className = `glass rounded-xl px-4 py-3 text-sm border ${colors[type]} min-w-[220px] animate-slide-up shadow-xl`;
+    t.textContent = msg;
+    document.getElementById('toast-container').appendChild(t);
+    setTimeout(() => t.remove(), 4000);
+  }
+
+  function setLoading(loading) {
+    const btn = document.getElementById('btn-run');
+    if (loading) {
+      btn.disabled = true;
+      btn.innerHTML = '<svg class="animate-spin-slow inline w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>실행 중...';
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = '경사 하강 실행';
+    }
+  }
+
+  function updateLr(val) {
+    const v = parseFloat(val);
+    const el = document.getElementById('lr-val');
+    const warn = document.getElementById('lr-warning');
+    const slider = document.getElementById('lr-slider');
+    el.textContent = v.toFixed(2);
+    if (v >= 0.8) {
+      el.className = 'font-bold text-lg text-brand-rose';
+      slider.className = 'w-full lr-danger cursor-pointer';
+      warn.classList.remove('hidden');
+    } else if (v >= 0.5) {
+      el.className = 'font-bold text-lg text-brand-amber';
+      slider.className = 'w-full lr-warn cursor-pointer';
+      warn.classList.remove('hidden');
+    } else {
+      el.className = 'font-bold text-lg text-brand-cyan';
+      slider.className = 'w-full lr-ok cursor-pointer';
+      warn.classList.add('hidden');
+    }
+  }
+
+  function applyPreset(x0, lr, steps) {
+    document.getElementById('x0-slider').value = x0;
+    document.getElementById('x0-val').textContent = parseFloat(x0).toFixed(1);
+    document.getElementById('lr-slider').value = lr;
+    updateLr(lr);
+    document.getElementById('steps-slider').value = steps;
+    document.getElementById('steps-val').textContent = steps;
+  }
+
+  function showImg(imgId, phId, url) {
+    const img = document.getElementById(imgId);
+    img.src = cacheBust(url);
+    img.classList.remove('hidden');
+    document.getElementById(phId).classList.add('hidden');
+  }
+
+  function buildTable(history, diverged) {
+    const tbody = document.getElementById('step-tbody');
+    tbody.innerHTML = '';
+    history.forEach((h, i) => {
+      const isLast = i === history.length - 1;
+      const cls = isLast ? (diverged ? 'table-row-diverged' : 'table-row-last') : '';
+      const lossStr = h.loss < 1e-4 ? h.loss.toExponential(3) : h.loss.toFixed(4);
+      tbody.innerHTML += `
+        <tr class="${cls}">
+          <td class="px-3 py-1.5 text-slate-400">${h.step}</td>
+          <td class="px-3 py-1.5 text-right text-brand-violet">${h.x.toFixed(5)}</td>
+          <td class="px-3 py-1.5 text-right text-brand-cyan">${lossStr}</td>
+          <td class="px-3 py-1.5 text-right text-brand-rose">${h.gradient.toFixed(4)}</td>
+          <td class="px-3 py-1.5 text-right text-slate-300">${h.delta_x.toFixed(5)}</td>
+        </tr>`;
+    });
+  }
+
+  async function runGD() {
+    const x0    = document.getElementById('x0-slider').value;
+    const lr    = document.getElementById('lr-slider').value;
+    const steps = document.getElementById('steps-slider').value;
+    setLoading(true);
+
+    try {
+      const res = await fetch(`/run?x0=${x0}&lr=${lr}&steps=${steps}`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      const data = await res.json();
+
+      // Graphs
+      showImg('landscape-img', 'landscape-ph', data.landscape_plot);
+      showImg('loss-img',      'loss-ph',      data.loss_curve);
+
+      // Result badges
+      document.getElementById('badge-x').textContent    = data.final_x.toFixed(5);
+      document.getElementById('badge-loss').textContent = data.final_loss < 1e-4 ? data.final_loss.toExponential(2) : data.final_loss.toFixed(4);
+      document.getElementById('badge-steps').textContent = data.actual_steps;
+      document.getElementById('result-section').classList.remove('hidden');
+
+      const rb = document.getElementById('badge-result');
+      if (data.diverged) {
+        rb.className = 'text-center py-2 rounded-xl font-bold text-sm border border-rose-500 text-rose-400 bg-rose-900/20';
+        rb.textContent = '💥 발산! lr을 줄여보세요';
+      } else if (data.converged) {
+        rb.className = 'text-center py-2 rounded-xl font-bold text-sm border border-green-500 text-green-400 bg-green-900/20';
+        rb.textContent = `✓ 수렴 완료! (${data.actual_steps}스텝)`;
+      } else {
+        rb.className = 'text-center py-2 rounded-xl font-bold text-sm border border-amber-500 text-amber-400 bg-amber-900/20';
+        rb.textContent = `→ 진행 중... 더 많은 스텝이 필요합니다`;
+      }
+
+      // Status badge
+      const sb = document.getElementById('status-badge');
+      if (data.diverged) {
+        sb.className = 'px-3 py-1.5 rounded-full text-xs font-semibold border border-rose-500 text-rose-400 bg-rose-900/30';
+        sb.textContent = `● 발산 (lr=${data.lr})`;
+      } else if (data.converged) {
+        sb.className = 'px-3 py-1.5 rounded-full text-xs font-semibold border border-green-500 text-green-400 bg-green-900/30';
+        sb.textContent = `● 수렴 완료 (${data.actual_steps}스텝)`;
+      } else {
+        sb.className = 'px-3 py-1.5 rounded-full text-xs font-semibold border border-amber-500 text-amber-400 bg-amber-900/30';
+        sb.textContent = `● 진행 중 (${data.actual_steps}스텝)`;
+      }
+
+      // Table
+      buildTable(data.history, data.diverged);
+      document.getElementById('table-section').classList.remove('hidden');
+
+      const toastType = data.diverged ? 'error' : data.converged ? 'success' : 'warn';
+      const toastMsg  = data.diverged
+        ? `💥 발산! x=${data.final_x.toFixed(2)}`
+        : data.converged
+        ? `✓ 수렴! ${data.actual_steps}스텝 만에 x≈0 도달`
+        : `→ ${data.actual_steps}스텝 후 x=${data.final_x.toFixed(3)}`;
+      showToast(toastMsg, toastType);
+
+    } catch(err) {
+      showToast('오류: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  }
+</script>
+</body>
+</html>

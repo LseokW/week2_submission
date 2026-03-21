@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>데이터 전처리 × NumPy</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            dark: { DEFAULT: '#0f172a', panel: '#1e293b', border: '#334155' },
+            brand: { cyan: '#06b6d4', violet: '#8b5cf6', rose: '#f43f5e', amber: '#f59e0b', green: '#22c55e' }
+          },
+          animation: {
+            'fade-in':   'fadeIn .6s ease forwards',
+            'slide-up':  'slideUp .5s ease forwards',
+            'spin-slow': 'spin 1.5s linear infinite',
+          },
+          keyframes: {
+            fadeIn:  { from:{opacity:0}, to:{opacity:1} },
+            slideUp: { from:{opacity:0,transform:'translateY(20px)'}, to:{opacity:1,transform:'translateY(0)'} },
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})"></script>
+
+  <style>
+    ::-webkit-scrollbar{width:6px}
+    ::-webkit-scrollbar-track{background:#0f172a}
+    ::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+
+    .glass{
+      background:rgba(30,41,59,0.7);
+      backdrop-filter:blur(12px);
+      -webkit-backdrop-filter:blur(12px);
+      border:1px solid rgba(51,65,85,0.8);
+    }
+    .gradient-text{
+      background:linear-gradient(135deg,#06b6d4 0%,#8b5cf6 50%,#f43f5e 100%);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+    }
+    .btn-glow{
+      position:relative;background:linear-gradient(135deg,#f59e0b,#06b6d4);
+      transition:all .3s ease;
+    }
+    .btn-glow::before{
+      content:'';position:absolute;inset:-2px;
+      background:linear-gradient(135deg,#f59e0b,#06b6d4,#8b5cf6);
+      border-radius:inherit;z-index:-1;opacity:0;transition:opacity .3s;
+    }
+    .btn-glow:hover::before{opacity:1}
+    .btn-glow:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(245,158,11,.35)}
+    .btn-glow:active{transform:translateY(0)}
+    .input-glow:focus{box-shadow:0 0 0 2px rgba(6,182,212,.4);border-color:#06b6d4;outline:none}
+    .plot-img{transition:transform .3s,box-shadow .3s}
+    .plot-img:hover{transform:scale(1.02);box-shadow:0 0 30px rgba(6,182,212,.2)}
+
+    .stat-row{display:flex;justify-content:space-between;padding:.35rem 0;border-bottom:1px solid rgba(51,65,85,.5);font-size:.75rem}
+    .stat-row:last-child{border-bottom:none}
+
+    #toast-container{position:fixed;top:1.5rem;right:1.5rem;z-index:9999;display:flex;flex-direction:column;gap:.5rem}
+  </style>
+</head>
+
+<body class="bg-[#0f172a] text-white min-h-screen font-sans">
+<div id="toast-container"></div>
+
+<!-- Header -->
+<header class="border-b border-dark-border/50 bg-dark-panel/40 backdrop-blur-md sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-amber to-brand-cyan flex items-center justify-center font-black text-sm shadow-lg">N</div>
+      <div>
+        <h1 class="text-xl font-bold gradient-text tracking-tight">데이터 전처리 × NumPy</h1>
+        <p class="text-xs text-slate-400">Min-Max 정규화로 단위 문제 해결</p>
+      </div>
+    </div>
+    <div id="status-badge" class="px-3 py-1.5 rounded-full text-xs font-semibold border border-slate-600 text-slate-400 bg-slate-800/50">
+      ● 대기 중
+    </div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-6 py-8 space-y-8 animate-fade-in">
+
+  <!-- Hero -->
+  <section class="text-center space-y-3">
+    <h2 class="text-4xl font-extrabold gradient-text">Min-Max Normalization</h2>
+    <p class="text-slate-300 text-lg max-w-2xl mx-auto">
+      단위가 극단적으로 다른 데이터를 <span class="text-brand-amber font-semibold">0~1 사이</span>로 압축해<br>
+      머신러닝 모델이 공정하게 학습할 수 있게 만드는 필수 전처리 기법
+    </p>
+    <div class="flex justify-center gap-8 text-sm mt-3">
+      <div class="glass rounded-xl px-4 py-2 text-center">
+        <div class="text-brand-amber font-bold text-lg">연봉</div>
+        <div class="text-slate-400 text-xs">3천만 ~ 1억원</div>
+      </div>
+      <div class="flex items-center text-slate-500 text-xl font-bold">→</div>
+      <div class="glass rounded-xl px-4 py-2 text-center">
+        <div class="text-brand-cyan font-bold text-lg">0.000 ~ 1.000</div>
+        <div class="text-slate-400 text-xs">정규화 후</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 개념 카드 -->
+  <section class="glass rounded-2xl p-6">
+    <h3 class="text-lg font-bold mb-4 flex items-center gap-2"><span class="text-brand-violet">⚙</span> 정규화 원리</h3>
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="bg-slate-900/60 rounded-xl p-5">
+        <div class="text-xs text-slate-400 uppercase tracking-widest mb-3 font-semibold">Min-Max 공식</div>
+        <div class="text-white text-lg">$$x' = \dfrac{x - x_{\min}}{x_{\max} - x_{\min}}$$</div>
+        <p class="text-xs text-slate-400 mt-3">결과값은 항상 $0 \leq x' \leq 1$ 범위에 들어옵니다.<br>최솟값 → 0, 최댓값 → 1, 나머지는 비례 배치.</p>
+      </div>
+      <div class="space-y-3">
+        <div class="glass rounded-xl p-4 border-l-4 border-brand-rose">
+          <div class="text-sm font-semibold text-brand-rose mb-1">⚠ 정규화 없이 학습하면?</div>
+          <div class="text-xs text-slate-400">연봉(~1억)이 나이(~60)보다 <strong class="text-white">백만 배</strong> 크므로 모델이 연봉에만 집중하고 나이를 무시함</div>
+        </div>
+        <div class="glass rounded-xl p-4 border-l-4 border-brand-green">
+          <div class="text-sm font-semibold text-brand-green mb-1">✓ 정규화 후 학습하면?</div>
+          <div class="text-xs text-slate-400">모든 특성이 <strong class="text-white">0~1 동일 스케일</strong>로 맞춰져 모델이 각 특성을 공평하게 반영</div>
+        </div>
+        <div class="glass rounded-xl p-4 border-l-4 border-brand-cyan">
+          <div class="text-sm font-semibold text-brand-cyan mb-1">📌 numpy 구현 핵심</div>
+          <div class="text-xs font-mono text-slate-300">x' = (x - x.min()) / (x.max() - x.min())</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 제어 + 그래프 -->
+  <div class="grid lg:grid-cols-3 gap-6">
+
+    <!-- 제어 패널 -->
+    <div class="lg:col-span-1 space-y-5">
+      <div class="glass rounded-2xl p-6 space-y-5">
+        <h3 class="text-lg font-bold flex items-center gap-2"><span class="text-brand-amber">▶</span> 실행 제어</h3>
+
+        <!-- 샘플 슬라이더 -->
+        <div>
+          <div class="flex justify-between mb-2">
+            <label class="text-sm text-slate-300 font-medium">샘플 수</label>
+            <span id="n-val" class="text-brand-amber font-bold text-lg">50</span>
+          </div>
+          <input type="range" id="n-slider" min="10" max="100" value="50"
+                 class="w-full accent-brand-amber cursor-pointer"
+                 oninput="document.getElementById('n-val').textContent=this.value">
+          <div class="flex justify-between text-xs text-slate-500 mt-1"><span>10개</span><span>100개</span></div>
+        </div>
+
+        <button id="btn-run" onclick="runNormalize()"
+                class="btn-glow w-full py-3 rounded-xl text-white font-bold text-sm shadow-lg">
+          정규화 실행
+        </button>
+
+        <!-- 통계 카드: 연봉 -->
+        <div id="salary-stats" class="hidden animate-slide-up">
+          <div class="text-xs text-slate-400 uppercase tracking-widest mb-2 font-semibold flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-brand-amber inline-block"></span>연봉 통계
+          </div>
+          <div class="glass rounded-xl p-3 text-xs space-y-1">
+            <div class="grid grid-cols-3 text-slate-500 font-semibold pb-1 border-b border-slate-700">
+              <span></span><span class="text-center text-brand-amber">원본</span><span class="text-center text-brand-cyan">정규화</span>
+            </div>
+            <div class="stat-row"><span class="text-slate-400">min</span><span id="s-orig-min" class="text-brand-amber text-center"></span><span id="s-norm-min" class="text-brand-cyan text-right"></span></div>
+            <div class="stat-row"><span class="text-slate-400">max</span><span id="s-orig-max" class="text-brand-amber text-center"></span><span id="s-norm-max" class="text-brand-cyan text-right"></span></div>
+            <div class="stat-row"><span class="text-slate-400">mean</span><span id="s-orig-mean" class="text-brand-amber text-center"></span><span id="s-norm-mean" class="text-brand-cyan text-right"></span></div>
+            <div class="stat-row"><span class="text-slate-400">std</span><span id="s-orig-std" class="text-brand-amber text-center"></span><span id="s-norm-std" class="text-brand-cyan text-right"></span></div>
+          </div>
+        </div>
+
+        <!-- 통계 카드: 나이 -->
+        <div id="age-stats" class="hidden animate-slide-up">
+          <div class="text-xs text-slate-400 uppercase tracking-widest mb-2 font-semibold flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-brand-violet inline-block"></span>나이 통계
+          </div>
+          <div class="glass rounded-xl p-3 text-xs space-y-1">
+            <div class="grid grid-cols-3 text-slate-500 font-semibold pb-1 border-b border-slate-700">
+              <span></span><span class="text-center text-brand-violet">원본</span><span class="text-center text-brand-rose">정규화</span>
+            </div>
+            <div class="stat-row"><span class="text-slate-400">min</span><span id="a-orig-min" class="text-brand-violet text-center"></span><span id="a-norm-min" class="text-brand-rose text-right"></span></div>
+            <div class="stat-row"><span class="text-slate-400">max</span><span id="a-orig-max" class="text-brand-violet text-center"></span><span id="a-norm-max" class="text-brand-rose text-right"></span></div>
+            <div class="stat-row"><span class="text-slate-400">mean</span><span id="a-orig-mean" class="text-brand-violet text-center"></span><span id="a-norm-mean" class="text-brand-rose text-right"></span></div>
+            <div class="stat-row"><span class="text-slate-400">std</span><span id="a-orig-std" class="text-brand-violet text-center"></span><span id="a-norm-std" class="text-brand-rose text-right"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 그래프 -->
+    <div class="lg:col-span-2 space-y-5">
+
+      <!-- Scatter -->
+      <div class="glass rounded-2xl p-5">
+        <h3 class="font-bold text-sm text-slate-300 uppercase tracking-widest mb-3">Before / After 산점도</h3>
+        <div id="scatter-ph" class="flex items-center justify-center h-52 rounded-xl bg-slate-900/60 border border-slate-700/50">
+          <div class="text-center text-slate-500"><div class="text-4xl mb-2">⟷</div><div class="text-sm">정규화 실행 후 표시됩니다</div></div>
+        </div>
+        <img id="scatter-img" src="" alt="Scatter" class="plot-img hidden w-full rounded-xl"/>
+      </div>
+
+      <!-- Salary Hist -->
+      <div class="glass rounded-2xl p-5">
+        <h3 class="font-bold text-sm text-slate-300 uppercase tracking-widest mb-3">
+          <span class="text-brand-amber">■</span> 연봉 분포 히스토그램
+        </h3>
+        <div id="salary-ph" class="flex items-center justify-center h-44 rounded-xl bg-slate-900/60 border border-slate-700/50">
+          <div class="text-center text-slate-500"><div class="text-4xl mb-2">📊</div><div class="text-sm">연봉 분포 비교</div></div>
+        </div>
+        <img id="salary-img" src="" alt="Salary Hist" class="plot-img hidden w-full rounded-xl"/>
+      </div>
+
+      <!-- Age Hist -->
+      <div class="glass rounded-2xl p-5">
+        <h3 class="font-bold text-sm text-slate-300 uppercase tracking-widest mb-3">
+          <span class="text-brand-violet">■</span> 나이 분포 히스토그램
+        </h3>
+        <div id="age-ph" class="flex items-center justify-center h-44 rounded-xl bg-slate-900/60 border border-slate-700/50">
+          <div class="text-center text-slate-500"><div class="text-4xl mb-2">📊</div><div class="text-sm">나이 분포 비교</div></div>
+        </div>
+        <img id="age-img" src="" alt="Age Hist" class="plot-img hidden w-full rounded-xl"/>
+      </div>
+    </div>
+  </div>
+
+  <!-- 코드 스니펫 -->
+  <section class="glass rounded-2xl p-6">
+    <h3 class="text-lg font-bold mb-5 flex items-center gap-2"><span class="text-brand-violet">{ }</span> 구현 핵심 코드</h3>
+    <div class="grid md:grid-cols-2 gap-4 text-xs font-mono">
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-amber text-xs mb-3 font-sans uppercase tracking-widest">데이터 생성</div>
+<pre class="text-slate-300 leading-relaxed"><span class="text-brand-violet">np.random.seed(42)</span>
+salary = np.random.uniform(
+    30_000_000, 100_000_000, n)
+age = np.random.uniform(20, 60, n)</pre>
+      </div>
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-cyan text-xs mb-3 font-sans uppercase tracking-widest">Min-Max 정규화</div>
+<pre class="text-slate-300 leading-relaxed"><span class="text-brand-violet"># (x - min) / (max - min)</span>
+salary_norm = (salary - salary.min()) \
+            / (salary.max() - salary.min())
+age_norm    = (age - age.min()) \
+            / (age.max() - age.min())</pre>
+      </div>
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-violet text-xs mb-3 font-sans uppercase tracking-widest">정규화 전 통계</div>
+<pre class="text-slate-300 leading-relaxed"><span class="text-brand-violet"># 단위 차이 확인</span>
+print(salary.min())   <span class="text-slate-500"># ~3천만</span>
+print(salary.max())   <span class="text-slate-500"># ~1억</span>
+print(age.min())      <span class="text-slate-500"># ~20</span>
+print(age.max())      <span class="text-slate-500"># ~60</span></pre>
+      </div>
+      <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-700/50">
+        <div class="text-brand-green text-xs mb-3 font-sans uppercase tracking-widest">정규화 후 통계</div>
+<pre class="text-slate-300 leading-relaxed"><span class="text-brand-violet"># 모두 0~1 범위</span>
+print(salary_norm.min())  <span class="text-slate-500"># 0.0</span>
+print(salary_norm.max())  <span class="text-slate-500"># 1.0</span>
+print(age_norm.min())     <span class="text-slate-500"># 0.0</span>
+print(age_norm.max())     <span class="text-slate-500"># 1.0</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <footer class="text-center text-slate-600 text-xs py-4">
+    데이터 전처리 × NumPy — sklearn 없이 직접 구현 · FastAPI + Tailwind CSS
+  </footer>
+</main>
+
+<script>
+  function cacheBust(url) { return url + '?t=' + Date.now(); }
+
+  function showToast(msg, type='info') {
+    const colors = { success:'border-green-500 text-green-300', error:'border-rose-500 text-rose-300', info:'border-cyan-500 text-cyan-300' };
+    const t = document.createElement('div');
+    t.className = `glass rounded-xl px-4 py-3 text-sm border ${colors[type]} min-w-[220px] animate-slide-up shadow-xl`;
+    t.textContent = msg;
+    document.getElementById('toast-container').appendChild(t);
+    setTimeout(() => t.remove(), 3500);
+  }
+
+  function setLoading(loading) {
+    const btn = document.getElementById('btn-run');
+    if (loading) {
+      btn.disabled = true;
+      btn.innerHTML = '<svg class="animate-spin-slow inline w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>처리 중...';
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = '정규화 실행';
+    }
+  }
+
+  function fmt(val, isSalary=false) {
+    if (isSalary) return (val/1_000_000).toFixed(2) + 'M';
+    return val.toFixed(4);
+  }
+
+  function fillStats(prefix, orig, norm, isSalary=false) {
+    ['min','max','mean','std'].forEach(k => {
+      document.getElementById(`${prefix}-orig-${k}`).textContent = fmt(orig[k], isSalary);
+      document.getElementById(`${prefix}-norm-${k}`).textContent = norm[k].toFixed(4);
+    });
+  }
+
+  function showImg(imgId, phId, url) {
+    const img = document.getElementById(imgId);
+    img.src = cacheBust(url);
+    img.classList.remove('hidden');
+    document.getElementById(phId).classList.add('hidden');
+  }
+
+  async function runNormalize() {
+    const n = document.getElementById('n-slider').value;
+    setLoading(true);
+    try {
+      const res = await fetch(`/normalize?n_samples=${n}`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      const data = await res.json();
+
+      // 통계 표시
+      fillStats('s', data.salary_stats.original, data.salary_stats.normalized, true);
+      fillStats('a', data.age_stats.original,    data.age_stats.normalized,    false);
+      document.getElementById('salary-stats').classList.remove('hidden');
+      document.getElementById('age-stats').classList.remove('hidden');
+
+      // 그래프
+      showImg('scatter-img', 'scatter-ph', data.scatter_plot);
+      showImg('salary-img',  'salary-ph',  data.salary_hist);
+      showImg('age-img',     'age-ph',     data.age_hist);
+
+      // 상태 뱃지
+      const sb = document.getElementById('status-badge');
+      sb.className = 'px-3 py-1.5 rounded-full text-xs font-semibold border border-green-500 text-green-400 bg-green-900/30';
+      sb.textContent = `● 정규화 완료 (n=${data.n_samples})`;
+
+      showToast(`정규화 완료! 샘플 ${data.n_samples}개 처리 (${data.processing_time_sec}s)`, 'success');
+    } catch(err) {
+      showToast('오류: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  }
+</script>
+</body>
+</html>

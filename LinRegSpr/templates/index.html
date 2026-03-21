@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>훅의 법칙 × TensorFlow</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            dark: { DEFAULT: '#0f172a', panel: '#1e293b', border: '#334155' },
+            brand: { cyan: '#06b6d4', violet: '#8b5cf6', rose: '#f43f5e',
+                     amber: '#f59e0b', green: '#22c55e' }
+          },
+          animation: {
+            'fade-in': 'fadeIn 0.6s ease forwards',
+            'slide-up': 'slideUp 0.5s ease forwards',
+            'pulse-slow': 'pulse 2s cubic-bezier(0.4,0,0.6,1) infinite',
+            'spin-slow': 'spin 1.5s linear infinite',
+          },
+          keyframes: {
+            fadeIn: { from: { opacity: 0 }, to: { opacity: 1 } },
+            slideUp: { from: { opacity: 0, transform: 'translateY(20px)' },
+                       to:   { opacity: 1, transform: 'translateY(0)' } },
+          },
+          backdropBlur: { xs: '2px' }
+        }
+      }
+    }
+  </script>
+
+  <!-- KaTeX for math rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})"></script>
+
+  <style>
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+    /* Glass card */
+    .glass {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(51, 65, 85, 0.8);
+    }
+
+    /* Gradient text */
+    .gradient-text {
+      background: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 50%, #f43f5e 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* Gradient border button */
+    .btn-glow {
+      position: relative;
+      background: linear-gradient(135deg, #06b6d4, #8b5cf6);
+      transition: all 0.3s ease;
+    }
+    .btn-glow::before {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      background: linear-gradient(135deg, #06b6d4, #8b5cf6, #f43f5e);
+      border-radius: inherit;
+      z-index: -1;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .btn-glow:hover::before { opacity: 1; }
+    .btn-glow:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(6,182,212,0.4); }
+    .btn-glow:active { transform: translateY(0); }
+
+    /* Input glow */
+    .input-glow:focus {
+      box-shadow: 0 0 0 2px rgba(6,182,212,0.4);
+      border-color: #06b6d4;
+      outline: none;
+    }
+
+    /* Plot image */
+    .plot-img {
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .plot-img:hover {
+      transform: scale(1.02);
+      box-shadow: 0 0 30px rgba(6,182,212,0.25);
+    }
+
+    /* Formula card */
+    .formula-card {
+      background: linear-gradient(135deg, rgba(6,182,212,0.08), rgba(139,92,246,0.08));
+      border: 1px solid rgba(6,182,212,0.25);
+    }
+
+    /* Metric badge */
+    .metric-val { font-variant-numeric: tabular-nums; }
+
+    /* Progress bar */
+    @keyframes progress-shine {
+      0%   { background-position: -200% center; }
+      100% { background-position: 200% center; }
+    }
+    .progress-bar {
+      background: linear-gradient(90deg, #06b6d4 0%, #8b5cf6 50%, #f43f5e 100%);
+      background-size: 200% auto;
+      animation: progress-shine 2s linear infinite;
+    }
+
+    /* Tooltip */
+    .tooltip-text {
+      visibility: hidden;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .tooltip:hover .tooltip-text {
+      visibility: visible;
+      opacity: 1;
+    }
+  </style>
+</head>
+<body class="bg-[#0f172a] text-slate-100 min-h-screen font-sans antialiased">
+
+  <!-- ╔══════════════════════════════════════════════════╗ -->
+  <!-- ║  HEADER                                          ║ -->
+  <!-- ╚══════════════════════════════════════════════════╝ -->
+  <header class="border-b border-slate-800 bg-[#0f172a]/95 backdrop-blur-sm sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-400 to-violet-600
+                    flex items-center justify-center shadow-lg shadow-cyan-500/20">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold gradient-text leading-none">훅의 법칙 × TensorFlow</h1>
+          <p class="text-xs text-slate-500 mt-0.5">Hooke's Law Linear Regression Demo</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="status-badge"
+              class="px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">
+          ⬤ 미학습
+        </span>
+        <a href="/docs" target="_blank"
+           class="px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-400
+                  border border-slate-700 hover:border-cyan-500 hover:text-cyan-400 transition-colors">
+          API Docs ↗
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-10">
+
+    <!-- ╔══════════════════════════════════════════════════╗ -->
+    <!-- ║  HERO — 훅의 법칙 설명                           ║ -->
+    <!-- ╚══════════════════════════════════════════════════╝ -->
+    <section class="mb-10 animate-fade-in">
+      <div class="glass rounded-2xl p-8">
+        <div class="flex flex-col lg:flex-row gap-8 items-start">
+
+          <!-- 설명 텍스트 -->
+          <div class="flex-1 space-y-5">
+            <div>
+              <span class="text-xs font-semibold uppercase tracking-widest text-cyan-400">
+                Physics × Machine Learning
+              </span>
+              <h2 class="text-3xl font-bold text-white mt-1">
+                훅의 법칙<span class="gradient-text"> (Hooke's Law)</span>
+              </h2>
+            </div>
+
+            <p class="text-slate-400 leading-relaxed">
+              탄성 범위 안에서 용수철에 가해진 <strong class="text-slate-200">힘(F)</strong>은
+              용수철의 <strong class="text-slate-200">늘어난 길이(x)</strong>에 비례합니다.
+              TensorFlow가 노이즈 섞인 실험 데이터에서 이 선형 관계를 학습합니다.
+            </p>
+
+            <!-- 공식 카드 -->
+            <div class="formula-card rounded-xl p-5 space-y-3">
+              <div class="text-center text-xl">
+                $F = k \cdot x$
+              </div>
+              <div class="text-center text-lg text-slate-300">
+                $L = k \cdot m + L_0$
+              </div>
+              <div class="grid grid-cols-3 gap-3 mt-3 text-center text-sm">
+                <div class="bg-slate-800/60 rounded-lg p-3">
+                  <div class="text-cyan-400 font-bold">k = 2 cm/kg</div>
+                  <div class="text-slate-500 text-xs mt-1">용수철 상수</div>
+                </div>
+                <div class="bg-slate-800/60 rounded-lg p-3">
+                  <div class="text-violet-400 font-bold">L₀ = 10 cm</div>
+                  <div class="text-slate-500 text-xs mt-1">초기 길이</div>
+                </div>
+                <div class="bg-slate-800/60 rounded-lg p-3">
+                  <div class="text-rose-400 font-bold">σ = 1.2 cm</div>
+                  <div class="text-slate-500 text-xs mt-1">측정 노이즈</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 학습 컨트롤 패널 -->
+          <div class="lg:w-80 w-full space-y-4">
+            <div class="bg-slate-900/60 rounded-xl p-5 border border-slate-700/60 space-y-4">
+              <h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+                모델 학습 설정
+              </h3>
+
+              <!-- Epoch 설정 -->
+              <div>
+                <label class="flex items-center justify-between text-sm text-slate-400 mb-2">
+                  <span>학습 Epoch</span>
+                  <span id="epoch-display" class="text-cyan-400 font-bold metric-val">500</span>
+                </label>
+                <input id="epoch-slider" type="range"
+                       min="100" max="2000" step="100" value="500"
+                       class="w-full h-2 rounded-full appearance-none cursor-pointer
+                              bg-slate-700 accent-cyan-400"
+                       oninput="document.getElementById('epoch-display').textContent=this.value">
+                <div class="flex justify-between text-xs text-slate-600 mt-1">
+                  <span>100</span><span>2000</span>
+                </div>
+              </div>
+
+              <!-- 학습 버튼 -->
+              <button id="train-btn" onclick="startTraining()"
+                      class="btn-glow w-full py-3 rounded-xl text-white font-semibold
+                             text-sm flex items-center justify-center gap-2">
+                <svg id="train-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                <span id="train-btn-text">학습 시작</span>
+              </button>
+
+              <!-- 학습 진행 표시 -->
+              <div id="progress-container" class="hidden">
+                <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+                  <span>학습 중...</span>
+                  <span id="progress-text">0%</span>
+                </div>
+                <div class="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                  <div id="progress-fill" class="progress-bar h-full rounded-full w-0
+                              transition-all duration-300"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 학습 결과 메트릭 -->
+            <div id="metrics-panel" class="hidden bg-slate-900/60 rounded-xl p-5
+                                           border border-slate-700/60 space-y-3 animate-slide-up">
+              <h3 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">
+                학습 결과
+              </h3>
+              <div class="grid grid-cols-2 gap-2 text-sm">
+                <div class="bg-slate-800/80 rounded-lg p-3">
+                  <div class="text-slate-500 text-xs">Final Loss</div>
+                  <div id="m-loss" class="text-cyan-400 font-bold metric-val mt-0.5">—</div>
+                </div>
+                <div class="bg-slate-800/80 rounded-lg p-3">
+                  <div class="text-slate-500 text-xs">Final MAE</div>
+                  <div id="m-mae" class="text-violet-400 font-bold metric-val mt-0.5">—</div>
+                </div>
+                <div class="bg-slate-800/80 rounded-lg p-3">
+                  <div class="text-slate-500 text-xs">학습된 k</div>
+                  <div id="m-k" class="text-rose-400 font-bold metric-val mt-0.5">—</div>
+                </div>
+                <div class="bg-slate-800/80 rounded-lg p-3">
+                  <div class="text-slate-500 text-xs">학습된 L₀</div>
+                  <div id="m-b" class="text-amber-400 font-bold metric-val mt-0.5">—</div>
+                </div>
+              </div>
+              <div id="m-time" class="text-xs text-slate-500 text-right">학습 시간: —</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ╔══════════════════════════════════════════════════╗ -->
+    <!-- ║  PLOTS — Loss 및 회귀선                          ║ -->
+    <!-- ╚══════════════════════════════════════════════════╝ -->
+    <section id="plots-section" class="mb-10 hidden animate-slide-up">
+      <h2 class="text-xl font-bold text-white mb-5 flex items-center gap-2">
+        <span class="w-2 h-6 rounded bg-gradient-to-b from-cyan-400 to-violet-600 inline-block"></span>
+        학습 시각화
+      </h2>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- Loss Curve -->
+        <div class="glass rounded-2xl overflow-hidden">
+          <div class="px-5 py-3 border-b border-slate-700/60 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+              <span class="text-sm font-medium text-slate-300">Loss Curve</span>
+            </div>
+            <span class="text-xs text-slate-500">MSE + MAE by Epoch</span>
+          </div>
+          <div class="p-4">
+            <img id="loss-img" src="" alt="Loss Curve"
+                 class="plot-img w-full rounded-xl hidden"
+                 style="background: #1e293b;" />
+            <div id="loss-placeholder"
+                 class="w-full h-52 rounded-xl bg-slate-800/50 border border-dashed border-slate-700
+                         flex items-center justify-center text-slate-600 text-sm">
+              학습 후 표시됩니다
+            </div>
+          </div>
+        </div>
+
+        <!-- Regression Plot -->
+        <div class="glass rounded-2xl overflow-hidden">
+          <div class="px-5 py-3 border-b border-slate-700/60 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-violet-400"></span>
+              <span class="text-sm font-medium text-slate-300">Spring Regression</span>
+            </div>
+            <span class="text-xs text-slate-500">Data + Fitted Line</span>
+          </div>
+          <div class="p-4">
+            <img id="reg-img" src="" alt="Spring Regression"
+                 class="plot-img w-full rounded-xl hidden"
+                 style="background: #1e293b;" />
+            <div id="reg-placeholder"
+                 class="w-full h-52 rounded-xl bg-slate-800/50 border border-dashed border-slate-700
+                         flex items-center justify-center text-slate-600 text-sm">
+              학습 후 표시됩니다
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ╔══════════════════════════════════════════════════╗ -->
+    <!-- ║  PREDICTION — 질량 → 길이 예측                   ║ -->
+    <!-- ╚══════════════════════════════════════════════════╝ -->
+    <section class="mb-10">
+      <h2 class="text-xl font-bold text-white mb-5 flex items-center gap-2">
+        <span class="w-2 h-6 rounded bg-gradient-to-b from-violet-400 to-rose-500 inline-block"></span>
+        예측하기
+      </h2>
+
+      <div class="glass rounded-2xl p-8">
+        <div class="flex flex-col lg:flex-row gap-8 items-start">
+
+          <!-- 입력 폼 -->
+          <div class="lg:w-96 w-full space-y-5">
+            <p class="text-slate-400 text-sm leading-relaxed">
+              TensorFlow 모델이 학습한 관계를 이용해
+              임의의 질량에 대한 용수철 길이를 예측합니다.
+            </p>
+
+            <!-- 질량 입력 -->
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">
+                질량 (mass)
+              </label>
+              <div class="flex gap-3">
+                <div class="relative flex-1">
+                  <input id="mass-input" type="number"
+                         value="7.5" min="0" max="100" step="0.1"
+                         placeholder="예: 7.5"
+                         class="input-glow w-full bg-slate-900 border border-slate-700
+                                rounded-xl px-4 py-3 text-white text-sm
+                                transition-all duration-200" />
+                  <span class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm">kg</span>
+                </div>
+                <button onclick="runPrediction()"
+                        id="predict-btn"
+                        class="btn-glow px-6 py-3 rounded-xl text-white font-semibold
+                               text-sm flex items-center gap-2 whitespace-nowrap">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 5l7 7-7 7"/>
+                  </svg>
+                  예측
+                </button>
+              </div>
+            </div>
+
+            <!-- 빠른 선택 -->
+            <div>
+              <p class="text-xs text-slate-500 mb-2">빠른 선택</p>
+              <div class="flex flex-wrap gap-2">
+                <button onclick="setMass(2.5)" class="quick-mass-btn px-3 py-1.5 rounded-lg text-xs
+                        bg-slate-800 text-slate-400 border border-slate-700
+                        hover:border-cyan-500 hover:text-cyan-400 transition-colors">2.5 kg</button>
+                <button onclick="setMass(5.0)" class="quick-mass-btn px-3 py-1.5 rounded-lg text-xs
+                        bg-slate-800 text-slate-400 border border-slate-700
+                        hover:border-cyan-500 hover:text-cyan-400 transition-colors">5.0 kg</button>
+                <button onclick="setMass(7.5)" class="quick-mass-btn px-3 py-1.5 rounded-lg text-xs
+                        bg-slate-800 text-slate-400 border border-slate-700
+                        hover:border-cyan-500 hover:text-cyan-400 transition-colors">7.5 kg</button>
+                <button onclick="setMass(12.0)" class="quick-mass-btn px-3 py-1.5 rounded-lg text-xs
+                        bg-slate-800 text-slate-400 border border-slate-700
+                        hover:border-violet-500 hover:text-violet-400 transition-colors">12.0 kg ↗</button>
+                <button onclick="setMass(20.0)" class="quick-mass-btn px-3 py-1.5 rounded-lg text-xs
+                        bg-slate-800 text-slate-400 border border-slate-700
+                        hover:border-violet-500 hover:text-violet-400 transition-colors">20.0 kg ↗</button>
+              </div>
+              <p class="text-xs text-slate-600 mt-1">↗ 외삽(extrapolation) 범위</p>
+            </div>
+
+            <!-- 예측 결과 표시 -->
+            <div id="pred-result" class="hidden animate-slide-up">
+              <div class="formula-card rounded-xl p-5 space-y-3">
+                <div class="flex items-baseline justify-between">
+                  <span class="text-sm text-slate-400">입력 질량</span>
+                  <span id="res-mass" class="text-lg font-bold text-cyan-400 metric-val">—</span>
+                </div>
+                <div class="border-t border-slate-700/60 pt-3">
+                  <div class="flex items-baseline justify-between">
+                    <span class="text-sm text-slate-400">예측 길이</span>
+                    <span id="res-length" class="text-3xl font-black gradient-text metric-val">—</span>
+                  </div>
+                </div>
+                <div class="flex items-baseline justify-between">
+                  <span class="text-sm text-slate-400">이론값</span>
+                  <span id="res-theory" class="text-sm font-semibold text-amber-400 metric-val">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 예측 플롯 -->
+          <div class="flex-1">
+            <div class="bg-slate-900/50 rounded-xl overflow-hidden border border-slate-700/60">
+              <div class="px-4 py-3 border-b border-slate-700/60 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                <span class="text-sm font-medium text-slate-300">Prediction Visualization</span>
+              </div>
+              <div class="p-4">
+                <img id="pred-img" src="" alt="Prediction Plot"
+                     class="plot-img w-full rounded-lg hidden" />
+                <div id="pred-placeholder"
+                     class="w-full h-64 rounded-lg bg-slate-800/50 border border-dashed border-slate-700
+                             flex items-center justify-center text-slate-600 text-sm">
+                  예측 후 표시됩니다
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ╔══════════════════════════════════════════════════╗ -->
+    <!-- ║  INFO — 모델 아키텍처 설명                        ║ -->
+    <!-- ╚══════════════════════════════════════════════════╝ -->
+    <section class="mb-10">
+      <div class="glass rounded-2xl p-8">
+        <h2 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
+          <span class="w-2 h-6 rounded bg-gradient-to-b from-green-400 to-cyan-500 inline-block"></span>
+          TensorFlow 모델 아키텍처
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5 text-sm">
+
+          <div class="bg-slate-900/60 rounded-xl p-5 border border-slate-700/50 space-y-3">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+                <span class="text-cyan-400 text-xs font-bold">1</span>
+              </div>
+              <span class="font-semibold text-slate-200">데이터 레이어</span>
+            </div>
+            <ul class="space-y-1.5 text-slate-400">
+              <li class="flex gap-2"><span class="text-cyan-500">▸</span> Input: mass (float32)</li>
+              <li class="flex gap-2"><span class="text-cyan-500">▸</span> 20 samples (0~10 kg)</li>
+              <li class="flex gap-2"><span class="text-cyan-500">▸</span> Gaussian noise σ=1.2</li>
+              <li class="flex gap-2"><span class="text-cyan-500">▸</span> True: L = 2m + 10</li>
+            </ul>
+          </div>
+
+          <div class="bg-slate-900/60 rounded-xl p-5 border border-slate-700/50 space-y-3">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-violet-500/20 flex items-center justify-center">
+                <span class="text-violet-400 text-xs font-bold">2</span>
+              </div>
+              <span class="font-semibold text-slate-200">Sequential 모델</span>
+            </div>
+            <ul class="space-y-1.5 text-slate-400">
+              <li class="flex gap-2"><span class="text-violet-500">▸</span> Dense(1) — 선형층</li>
+              <li class="flex gap-2"><span class="text-violet-500">▸</span> weight w ≈ k</li>
+              <li class="flex gap-2"><span class="text-violet-500">▸</span> bias b ≈ L₀</li>
+              <li class="flex gap-2"><span class="text-violet-500">▸</span> 활성화 없음 (선형)</li>
+            </ul>
+          </div>
+
+          <div class="bg-slate-900/60 rounded-xl p-5 border border-slate-700/50 space-y-3">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-rose-500/20 flex items-center justify-center">
+                <span class="text-rose-400 text-xs font-bold">3</span>
+              </div>
+              <span class="font-semibold text-slate-200">학습 설정</span>
+            </div>
+            <ul class="space-y-1.5 text-slate-400">
+              <li class="flex gap-2"><span class="text-rose-500">▸</span> Optimizer: Adam</li>
+              <li class="flex gap-2"><span class="text-rose-500">▸</span> lr = 0.1</li>
+              <li class="flex gap-2"><span class="text-rose-500">▸</span> Loss: MSE</li>
+              <li class="flex gap-2"><span class="text-rose-500">▸</span> Metric: MAE</li>
+            </ul>
+          </div>
+
+        </div>
+
+        <!-- 경사하강법 설명 -->
+        <div class="mt-6 bg-gradient-to-r from-cyan-500/5 to-violet-500/5
+                    rounded-xl p-5 border border-slate-700/40">
+          <h3 class="text-sm font-semibold text-slate-300 mb-2">경사하강법 (Gradient Descent)</h3>
+          <p class="text-slate-500 text-sm leading-relaxed">
+            Adam optimizer는 각 Epoch마다 MSE Loss의 기울기를 계산하고, 파라미터 <em class="text-cyan-400">w</em>(기울기)와
+            <em class="text-violet-400">b</em>(절편)을 업데이트합니다.
+            수백 번의 반복 후 모델은 훅의 법칙 $L = k \cdot m + L_0$를 근사적으로 학습합니다.
+          </p>
+          <div class="mt-3 text-center text-sm">
+            $w \leftarrow w - \alpha \frac{\partial \mathcal{L}}{\partial w}, \quad
+             b \leftarrow b - \alpha \frac{\partial \mathcal{L}}{\partial b}$
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ─── 푸터 ─────────────────────────────────────────────── -->
+  <footer class="border-t border-slate-800 py-6 text-center text-xs text-slate-600">
+    Hooke's Law × TensorFlow Demo &nbsp;|&nbsp;
+    FastAPI + Tailwind CSS &nbsp;|&nbsp;
+    Week 2 · Linear Regression
+  </footer>
+
+  <!-- ─── 알림 토스트 ──────────────────────────────────────── -->
+  <div id="toast" class="fixed bottom-6 right-6 z-50 hidden animate-slide-up">
+    <div id="toast-inner"
+         class="px-5 py-3 rounded-xl shadow-2xl text-sm font-medium flex items-center gap-3">
+      <span id="toast-icon"></span>
+      <span id="toast-msg"></span>
+    </div>
+  </div>
+
+
+  <!-- ╔══════════════════════════════════════════════════╗ -->
+  <!-- ║  JAVASCRIPT                                      ║ -->
+  <!-- ╚══════════════════════════════════════════════════╝ -->
+  <script>
+    // ── 상태 ────────────────────────────────────────────
+    let isTrained = false;
+    let trueK = 2.0;    // 서버에서 수신한 이론 상수 (훅의 법칙 k)
+    let trueB = 10.0;   // 서버에서 수신한 이론 절편 (초기 길이 L₀)
+
+    // ── 유틸 ────────────────────────────────────────────
+    function showToast(msg, type = 'success') {
+      const toast = document.getElementById('toast');
+      const inner = document.getElementById('toast-inner');
+      const icon  = document.getElementById('toast-icon');
+      const msgEl = document.getElementById('toast-msg');
+
+      const styles = {
+        success: 'bg-emerald-900/90 border border-emerald-700/60 text-emerald-200',
+        error:   'bg-rose-900/90 border border-rose-700/60 text-rose-200',
+        info:    'bg-cyan-900/90 border border-cyan-700/60 text-cyan-200',
+      };
+      const icons = { success: '✓', error: '✕', info: 'ℹ' };
+
+      inner.className = `px-5 py-3 rounded-xl shadow-2xl text-sm font-medium flex items-center gap-3 ${styles[type]}`;
+      icon.textContent  = icons[type];
+      msgEl.textContent = msg;
+      toast.classList.remove('hidden');
+      toast.classList.add('animate-slide-up');
+
+      clearTimeout(toast._timer);
+      toast._timer = setTimeout(() => toast.classList.add('hidden'), 3500);
+    }
+
+    function setStatusBadge(trained) {
+      const badge = document.getElementById('status-badge');
+      if (trained) {
+        badge.textContent = '⬤ 학습 완료';
+        badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-emerald-900/60 text-emerald-400 border border-emerald-700/60';
+      } else {
+        badge.textContent = '⬤ 미학습';
+        badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700';
+      }
+    }
+
+    function showImg(imgId, placeholderId, src) {
+      const img = document.getElementById(imgId);
+      const ph  = document.getElementById(placeholderId);
+      img.src = src + '?t=' + Date.now();
+      img.classList.remove('hidden');
+      ph.classList.add('hidden');
+    }
+
+    function setMass(val) {
+      document.getElementById('mass-input').value = val;
+    }
+
+    // ── 학습 ────────────────────────────────────────────
+    async function startTraining() {
+      const btn     = document.getElementById('train-btn');
+      const btnText = document.getElementById('train-btn-text');
+      const icon    = document.getElementById('train-icon');
+      const progContainer = document.getElementById('progress-container');
+      const progFill      = document.getElementById('progress-fill');
+      const progText      = document.getElementById('progress-text');
+      const epochs  = parseInt(document.getElementById('epoch-slider').value);
+
+      // 버튼 비활성화
+      btn.disabled = true;
+      btn.classList.add('opacity-70', 'cursor-not-allowed');
+      btnText.textContent = '학습 중...';
+      icon.classList.add('animate-spin-slow');
+      progContainer.classList.remove('hidden');
+
+      // 가짜 진행률 애니메이션
+      let fakeProgress = 0;
+      const fakeInterval = setInterval(() => {
+        fakeProgress = Math.min(fakeProgress + Math.random() * 3, 90);
+        progFill.style.width = fakeProgress + '%';
+        progText.textContent = Math.floor(fakeProgress) + '%';
+      }, 150);
+
+      try {
+        const res = await fetch(`/train?epochs=${epochs}`, { method: 'POST' });
+        clearInterval(fakeInterval);
+
+        if (!res.ok) throw new Error((await res.json()).detail);
+        const data = await res.json();
+
+        // 100% 완료
+        progFill.style.width = '100%';
+        progText.textContent = '100%';
+
+        // 이론 상수 저장 (서버에서 수신)
+        trueK = data.true_k;
+        trueB = data.true_b;
+
+        // 메트릭 업데이트
+        document.getElementById('m-loss').textContent = data.final_loss.toFixed(6);
+        document.getElementById('m-mae').textContent  = data.final_mae.toFixed(4) + ' cm';
+        document.getElementById('m-k').textContent    = data.learned_k.toFixed(4);
+        document.getElementById('m-b').textContent    = data.learned_b.toFixed(4) + ' cm';
+        document.getElementById('m-time').textContent = `학습 시간: ${data.training_time_sec}s`;
+
+        document.getElementById('metrics-panel').classList.remove('hidden');
+
+        // 플롯 표시
+        document.getElementById('plots-section').classList.remove('hidden');
+        showImg('loss-img', 'loss-placeholder', data.loss_plot);
+        showImg('reg-img',  'reg-placeholder',  data.regression_plot);
+
+        isTrained = true;
+        setStatusBadge(true);
+        showToast(`학습 완료! Loss: ${data.final_loss.toFixed(4)}`, 'success');
+
+        setTimeout(() => {
+          document.getElementById('plots-section').scrollIntoView({ behavior: 'smooth' });
+        }, 400);
+
+      } catch (err) {
+        clearInterval(fakeInterval);
+        showToast('학습 오류: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-70', 'cursor-not-allowed');
+        btnText.textContent = '다시 학습';
+        icon.classList.remove('animate-spin-slow');
+        setTimeout(() => progContainer.classList.add('hidden'), 1500);
+      }
+    }
+
+    // ── 예측 ────────────────────────────────────────────
+    async function runPrediction() {
+      if (!isTrained) {
+        showToast('먼저 학습을 완료해 주세요.', 'info');
+        document.getElementById('train-btn').scrollIntoView({ behavior: 'smooth' });
+        return;
+      }
+
+      const massVal = parseFloat(document.getElementById('mass-input').value);
+      if (isNaN(massVal) || massVal < 0) {
+        showToast('유효한 질량을 입력해 주세요. (≥ 0)', 'error');
+        return;
+      }
+
+      const predBtn = document.getElementById('predict-btn');
+      predBtn.disabled = true;
+      predBtn.classList.add('opacity-70', 'cursor-not-allowed');
+
+      try {
+        const res = await fetch('/predict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mass: massVal })
+        });
+        if (!res.ok) throw new Error((await res.json()).detail);
+        const data = await res.json();
+
+        const theory = trueK * massVal + trueB;  // 서버에서 받은 이론 상수 사용
+
+        document.getElementById('res-mass').textContent   = massVal.toFixed(2) + ' kg';
+        document.getElementById('res-length').textContent = data.predicted_length.toFixed(2) + ' cm';
+        document.getElementById('res-theory').textContent = theory.toFixed(2) + ' cm (이론)';
+        document.getElementById('pred-result').classList.remove('hidden');
+
+        showImg('pred-img', 'pred-placeholder', data.prediction_plot);
+        showToast(`예측: ${data.predicted_length.toFixed(2)} cm`, 'success');
+
+      } catch (err) {
+        showToast('예측 오류: ' + err.message, 'error');
+      } finally {
+        predBtn.disabled = false;
+        predBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+      }
+    }
+
+    // ── Enter 키 지원 ────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('mass-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter') runPrediction();
+      });
+
+      // 초기 상태 확인
+      fetch('/status').then(r => r.json()).then(d => {
+        if (d.is_trained) {
+          isTrained = true;
+          setStatusBadge(true);
+        }
+      }).catch(() => {});
+    });
+  </script>
+</body>
+</html>
