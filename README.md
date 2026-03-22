@@ -196,11 +196,13 @@ python week2/LinRegSpr/main.py      # http://localhost:8000
 python week2/UnSupClust/main.py     # http://localhost:8001
 python week2/DataProcessin/main.py  # http://localhost:8002
 python week2/GradDesVis/main.py     # http://localhost:8003
+```
 
 ## Week2 6.S191 Lecture 2 시청
+
 시청기록은 유튜브 스크린샷으로 남겼습니다. 또한 시청하며 함께 참조했던 Claude 의 요약 정리노트를 첨부했습니다.
 Claude 에게 스크립트를 제공하기 위하여 사용한 코드와 .md 파일 또한 함께 첨부했습니다. 
 
 
 
-```
+
